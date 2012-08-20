@@ -35,16 +35,8 @@ func (this Config) GetUser(name string) User {
 }
 
 func (this Config) Save() {
-	f, err := os.OpenFile(this.file, os.O_RDWR|os.O_CREATE, 0775)
-	if err != nil {
-		log.Fatalf("Failed to open %s %v\n", this.file, err)
-	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	err = enc.Encode(&this.users)
-	if err != nil {
-		log.Fatalf("Failed to save %s %v\n", this.file, err)
-	}
+	data := json.Marshal(&this.users)
+	log.Println(data)
 }
 
 func (this User) GetAccount(name string) Account {
