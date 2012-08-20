@@ -16,28 +16,32 @@ type Account struct {
 }
 
 type User struct {
-	Enabled  bool
-	Accounts map[string]Account
+	Enabled       bool
+	Accounts      map[string]Account
+	Last_weibo_id int64
 }
 
 type Config struct {
-	file     string
-	users    map[string]User
-	last_ids map[string]int64
+	file  string
+	users map[string]User
+}
+
+func (this Config) Users() map[string]User {
+	return this.users
 }
 
 func (this Config) GetUser(name string) User {
 	return this.users[name]
 }
 
-func (this Config) SaveLastIds() {
-	f, err := os.OpenFile(this.file+".id", os.O_RDWR|os.O_CREATE, 0775)
+func (this Config) Save() {
+	f, err := os.OpenFile(this.file, os.O_RDWR|os.O_CREATE, 0775)
 	if err != nil {
 		log.Fatalf("Failed to open %s %v\n", this.file, err)
 	}
 	defer f.Close()
 	enc := json.NewEncoder(f)
-	err = enc.Encode(&this.last_ids)
+	err = enc.Encode(&this.users)
 	if err != nil {
 		log.Fatalf("Failed to save %s %v\n", this.file, err)
 	}
@@ -45,6 +49,10 @@ func (this Config) SaveLastIds() {
 
 func (this User) GetAccount(name string) Account {
 	return this.Accounts[name]
+}
+
+func (this User) setLastId(id int64) {
+	this.setLastId(id)
 }
 
 func NewConfig(file string) *Config {
