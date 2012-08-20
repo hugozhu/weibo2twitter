@@ -17,26 +17,29 @@ type Account struct {
 
 type User struct {
 	Enabled       bool
-	Accounts      map[string]Account
+	Accounts      map[string]Account //never change
 	Last_weibo_id int64
 }
 
 type Config struct {
 	file  string
-	users map[string]User
+	users map[string]*User //may change during runtime
 }
 
-func (this Config) Users() map[string]User {
+func (this Config) Users() map[string]*User {
 	return this.users
 }
 
-func (this Config) GetUser(name string) User {
-	return this.users[name]
-}
-
 func (this Config) Save() {
-	data := json.Marshal(&this.users)
-	log.Println(data)
+	f, err := os.OpenFile(this.file, os.O_RDWR, 0755)
+	defer f.Close()
+
+	if err != nil {
+		log.Fatalf("Failed to open %s %v\n", this.file, err)
+	}
+
+	data, _ := json.MarshalIndent(&this.users, "", "    ")
+	f.WriteString(string(data))
 }
 
 func (this User) GetAccount(name string) Account {
