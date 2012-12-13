@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"config"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -38,9 +41,14 @@ func SubStringByChar(str string, len int) string {
 	return str
 }
 
+func GetStringLength(str string) int {
+	return utf8.RuneCount([]byte(str))
+}
+
 type Post struct {
-	Id   int64
-	Text string
+	Id     int64
+	Text   string
+	PicUrl string
 }
 
 func Timeline(access_token string, screen_name string, since_id int64) []Post {
@@ -70,7 +78,7 @@ func Timeline(access_token string, screen_name string, since_id int64) []Post {
 				text := entry["text"].(string)
 				link := ""
 				if entry["original_pic"] != nil {
-					link = " ✈ " + entry["original_pic"].(string)
+					link = entry["original_pic"].(string)
 				}
 
 				if entry["retweeted_status"] != nil {
@@ -81,18 +89,10 @@ func Timeline(access_token string, screen_name string, since_id int64) []Post {
 					}
 
 					if retweeted["original_pic"] != nil {
-						link = " ✈ " + retweeted["original_pic"].(string)
+						link = retweeted["original_pic"].(string)
 					}
 				}
-				len1 := utf8.RuneCount([]byte(text))
-				len2 := utf8.RuneCount([]byte(link))
-				if len1+len2 > 280 {
-					text = SubStringByChar(text, 280-len2) + link
-				} else {
-					text = text + link
-				}
-
-				posts = append(posts, Post{id, text})
+				posts = append(posts, Post{id, text, link})
 			}
 		}
 	} else {
@@ -112,22 +112,50 @@ func sync(name string, user *config.User) {
 			post := posts[i]
 			if post.Id > user.Last_weibo_id {
 				user.Last_weibo_id = post.Id
-				//post_laiwang(user, post.Text)
-				log.Println(weibo_account.Name, post.Text)
+				post_laiwang(user, post.Text, post.PicUrl)
+				log.Println(weibo_account.Name, post.Id, post.Text, post.PicUrl)
 			}
 		}
 	}
 }
 
-//http://open.laiwang.com/v1/post/add.api
 //curl -d ""  "https://open.laiwang.com/v1/post/add?access_token=f4f55c77856768d983e1671bbcd195&content=Hello"
+//curl -H "Expect:"  --form access_token=f4f55c77856768d983e1671bbcd195 --form content=hello  --form pic=@test.jpg  "https://open.laiwang.com/v1/post/addwithpic"
 
-func post_laiwang(user *config.User, content string) {
-	resp, err := http.PostForm("https://open.laiwang.com/v1/post/add", url.Values{
-		"access_token": {"f4f55c77856768d983e1671bbcd195"},
-		"content":      {content},
-	})
-	log.Println(resp, err)
+func post_laiwang(user *config.User, content string, pic_url string) {
+	var resp *http.Response
+	var err error
+
+	token := "f4f55c77856768d983e1671bbcd195"
+	if pic_url != "" {
+		buf := new(bytes.Buffer)
+		w := multipart.NewWriter(buf)
+		w.WriteField("access_token", token)
+		w.WriteField("content", content)
+		wr, _ := w.CreateFormFile("pic", "weibo.jpg")
+		resp, err = http.Get(pic_url)
+		if err == nil {
+			io.Copy(wr, resp.Body)
+		}
+		w.Close()
+		resp, err = http.Post("https://open.laiwang.com:45678/v1/post/addwithpic", w.FormDataContentType(), buf)
+	} else {
+		resp, err = http.PostForm("https://open.laiwang.com/v1/post/add", url.Values{
+			"access_token": {token},
+			"content":      {content},
+		})
+	}
+	bytes, _ := ioutil.ReadAll(resp.Body)
+	log.Println(string(bytes), err)
+}
+
+func fetch_img(url string) []byte {
+	resp, err := http.Get(url)
+	if err == nil {
+		bytes, _ := ioutil.ReadAll(resp.Body)
+		return bytes
+	}
+	return nil
 }
 
 var complete_chan chan string
@@ -135,7 +163,7 @@ var complete_chan chan string
 func main() {
 	conf := config.NewConfig(os.Getenv("PWD") + "/config.json")
 	defer func() {
-		//conf.Save()
+		conf.Save()
 	}()
 
 	ACCESS_TOKEN = ""
