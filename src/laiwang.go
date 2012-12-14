@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"config"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sqlite"
 	"strconv"
 	"unicode/utf8"
 )
@@ -51,9 +51,35 @@ type Post struct {
 	PicUrl string
 }
 
-func Timeline(access_token string, screen_name string, since_id int64) []Post {
+func sync_weibo_2_laiwang(user map[string]interface{}) {
+	var last_weibo_id int64
+	if user["pos"] != nil {
+		last_weibo_id = user["pos"].(int64)
+	}
+
+	posts := Timeline(ACCESS_TOKEN, user["weibo_uid"].(int64), last_weibo_id)
+
+	for i := len(posts) - 1; i >= 0; i-- {
+		post := posts[i]
+		if post.Id > last_weibo_id {
+			last_weibo_id = post.Id
+			post_laiwang(user, post.Text, post.PicUrl)
+			log.Println(user["weibo_name"], post.Id, post.Text, post.PicUrl)
+			db_execute(user["id"].(int64), last_weibo_id)
+		}
+	}
+}
+
+func db_execute(id int64, pos int64) {
+	sqlite.Run(os.Getenv("PWD")+"/db.sqlite3", func(db *sqlite.DB) {
+		sql := fmt.Sprintf("insert or replace into weibo_seq (id, pos) values (%d, %d)", id, pos)
+		db.Execute(sql)
+	})
+}
+
+func Timeline(access_token string, uid int64, since_id int64) []Post {
 	url := "https://api.weibo.com/2/statuses/user_timeline.json?access_token=" + access_token
-	url += fmt.Sprintf("&screen_name=%s&since_id=%d", screen_name, since_id)
+	url += fmt.Sprintf("&uid=%d&since_id=%d&count=20", uid, since_id)
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -103,30 +129,15 @@ func Timeline(access_token string, screen_name string, since_id int64) []Post {
 
 var ACCESS_TOKEN string
 
-func sync(name string, user *config.User) {
-	if user.Enabled {
-		weibo_account := user.GetAccount("tsina")
-		posts := Timeline(ACCESS_TOKEN, weibo_account.Name, user.Last_weibo_id)
-
-		for i := len(posts) - 1; i >= 0; i-- {
-			post := posts[i]
-			if post.Id > user.Last_weibo_id {
-				user.Last_weibo_id = post.Id
-				post_laiwang(user, post.Text, post.PicUrl)
-				log.Println(weibo_account.Name, post.Id, post.Text, post.PicUrl)
-			}
-		}
-	}
-}
-
 //curl -d ""  "https://open.laiwang.com/v1/post/add?access_token=f4f55c77856768d983e1671bbcd195&content=Hello"
 //curl -H "Expect:"  --form access_token=f4f55c77856768d983e1671bbcd195 --form content=hello  --form pic=@test.jpg  "https://open.laiwang.com/v1/post/addwithpic"
 
-func post_laiwang(user *config.User, content string, pic_url string) {
+func post_laiwang(user map[string]interface{}, content string, pic_url string) {
 	var resp *http.Response
 	var err error
 
-	token := "f4f55c77856768d983e1671bbcd195"
+	token := user["laiwang_access_token"].(string)
+
 	if pic_url != "" {
 		buf := new(bytes.Buffer)
 		w := multipart.NewWriter(buf)
@@ -138,7 +149,7 @@ func post_laiwang(user *config.User, content string, pic_url string) {
 			io.Copy(wr, resp.Body)
 		}
 		w.Close()
-		resp, err = http.Post("https://open.laiwang.com:45678/v1/post/addwithpic", w.FormDataContentType(), buf)
+		resp, err = http.Post("https://open.laiwang.com/v1/post/addwithpic", w.FormDataContentType(), buf)
 	} else {
 		resp, err = http.PostForm("https://open.laiwang.com/v1/post/add", url.Values{
 			"access_token": {token},
@@ -159,32 +170,34 @@ func fetch_img(url string) []byte {
 }
 
 var complete_chan chan string
+var users map[int64]map[string]interface{}
 
-func main() {
-	conf := config.NewConfig(os.Getenv("PWD") + "/config.json")
-	defer func() {
-		conf.Save()
-	}()
-
-	ACCESS_TOKEN = ""
+func init() {
+	users = make(map[int64]map[string]interface{})
+	sqlite.Run(os.Getenv("PWD")+"/db.sqlite3", func(db *sqlite.DB) {
+		results := db.Query("select b.*, a.pos from users b left join weibo_seq a on a.id=b.id")
+		for _, row := range results {
+			users[row["id"].(int64)] = row
+		}
+	})
 
 	data, err := ioutil.ReadFile(os.Getenv("PWD") + "/token")
-
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	ACCESS_TOKEN = string(data)
+}
 
-	n := len(conf.Users())
+func main() {
+	n := len(users)
 	complete_chan := make(chan string, n)
-	for name, user := range conf.Users() {
-		go func(n string, u *config.User) {
-			sync(n, u)
-			complete_chan <- n + " is done"
-		}(name, user)
+	for id, user := range users {
+		go func(id int64, u map[string]interface{}) {
+			sync_weibo_2_laiwang(u)
+			complete_chan <- fmt.Sprintf("%v is done", id)
+		}(id, user)
 	}
-	log.Println("wait for complete")
+	log.Println("wait for completion")
 	for i := 0; i < n; i++ {
 		log.Print(<-complete_chan)
 	}
