@@ -13,6 +13,7 @@ import (
 	"os"
 	"sqlite"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -185,7 +186,7 @@ func init() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ACCESS_TOKEN = string(data)
+	ACCESS_TOKEN = strings.TrimSpace(string(data))
 }
 
 func main() {
