@@ -135,8 +135,8 @@ func Timeline(access_token string, uid int64, since_id int64) []Post {
 
 var ACCESS_TOKEN string
 
-//curl -d ""  "https://open.laiwang.com/v1/post/add?access_token=f4f55c77856768d983e1671bbcd195&content=Hello"
-//curl -H "Expect:"  --form access_token=f4f55c77856768d983e1671bbcd195 --form content=hello  --form pic=@test.jpg  "https://open.laiwang.com/v1/post/addwithpic"
+//curl -d ""  "https://open.laiwang.com/v1/post/add?access_token=&content=Hello"
+//curl -H "Expect:"  --form access_token= --form content=hello  --form pic=@test.jpg  "https://open.laiwang.com/v1/post/addwithpic"
 
 func post_laiwang(user map[string]interface{}, content string, pic_url string) bool {
 	var resp *http.Response

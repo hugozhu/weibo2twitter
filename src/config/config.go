@@ -3,7 +3,6 @@ package config
 import (
 	"bufio"
 	"encoding/json"
-	// "io/ioutil"
 	"log"
 	"os"
 )
