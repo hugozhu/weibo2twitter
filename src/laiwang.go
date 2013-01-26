@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"config"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"sqlite"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -63,9 +65,13 @@ func sync_weibo_2_laiwang(user map[string]interface{}) {
 		post := posts[i]
 		if post.Id > last_weibo_id {
 			last_weibo_id = post.Id
-			post_laiwang(user, post.Text, post.PicUrl)
-			log.Println(user["weibo_name"], post.Id, post.Text, post.PicUrl)
-			db_execute(user["id"].(int64), last_weibo_id)
+			if post_laiwang(user, post.Text, post.PicUrl) {
+				log.Println(user["weibo_name"], post.Id, post.Text, post.PicUrl)
+				db_execute(user["id"].(int64), last_weibo_id)
+			} else {
+				refresh_laiwang_token(user)
+				break
+			}
 		}
 	}
 }
@@ -129,10 +135,10 @@ func Timeline(access_token string, uid int64, since_id int64) []Post {
 
 var ACCESS_TOKEN string
 
-//curl -d ""  "https://open.laiwang.com/v1/post/add?access_token=f4f55c77856768d983e1671bbcd195&content=Hello"
-//curl -H "Expect:"  --form access_token=f4f55c77856768d983e1671bbcd195 --form content=hello  --form pic=@test.jpg  "https://open.laiwang.com/v1/post/addwithpic"
+//curl -d ""  "https://open.laiwang.com/v1/post/add?access_token=&content=Hello"
+//curl -H "Expect:"  --form access_token= --form content=hello  --form pic=@test.jpg  "https://open.laiwang.com/v1/post/addwithpic"
 
-func post_laiwang(user map[string]interface{}, content string, pic_url string) {
+func post_laiwang(user map[string]interface{}, content string, pic_url string) bool {
 	var resp *http.Response
 	var err error
 
@@ -156,8 +162,38 @@ func post_laiwang(user map[string]interface{}, content string, pic_url string) {
 			"content":      {content},
 		})
 	}
+
 	bytes, _ := ioutil.ReadAll(resp.Body)
-	log.Println(string(bytes), err)
+
+	if err != nil {
+		return false
+	}
+
+	log.Println(user["weibo_name"], string(bytes), err)
+
+	return !strings.Contains(string(bytes), "expired_token")
+}
+
+func refresh_laiwang_token(user map[string]interface{}) {
+	refresh_token := user["laiwang_refresh_token"].(string)
+	resp, err := http.PostForm("https://api.laiwang.com/oauth/access_token?grant_type=refresh_token", url.Values{
+		"refresh_token": {refresh_token},
+		"client_id":     {config.LAIWANG_CLIENT_ID},
+		"client_secret": {config.LAIWANG_CLIENT_SECRET},
+	})
+	if err == nil {
+		bytes, _ := ioutil.ReadAll(resp.Body)
+		var data map[string]interface{}
+		json.Unmarshal(bytes, &data)
+		if data["access_token"] != nil {
+			access_token := data["access_token"].(string)
+			log.Println("Refresh access token: ", user["weibo_name"], access_token)
+			sqlite.Run(os.Getenv("PWD")+"/db.sqlite3", func(db *sqlite.DB) {
+				sql := fmt.Sprintf("update users set laiwang_access_token = '%s' where id=%d", access_token, user["id"])
+				db.Execute(sql)
+			})
+		}
+	}
 }
 
 func fetch_img(url string) []byte {
@@ -185,7 +221,7 @@ func init() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	ACCESS_TOKEN = string(data)
+	ACCESS_TOKEN = strings.TrimSpace(string(data))
 }
 
 func main() {
