@@ -7,7 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
-	// "strconv"
+	"strings"
 	"config"
 	"fmt"
 	"strconv"
@@ -148,7 +148,11 @@ func main() {
 		conf.Save()
 	}()
 
-	ACCESS_TOKEN = "2.008TkTLDIQdqsDbb35ec359cwkV8CB"
+    data, err := ioutil.ReadFile(os.Getenv("PWD") + "/token")
+    if err != nil {
+        log.Fatal(err)
+    }   
+    ACCESS_TOKEN = strings.TrimSpace(string(data))
 
 	n := len(conf.Users())
 	complete_chan := make(chan string, n)
