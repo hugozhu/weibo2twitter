@@ -122,7 +122,7 @@ func sync(name string, user *config.User) {
 			if post.Id > user.Last_weibo_id {
 				user.Last_weibo_id = post.Id
 				tweet, err := t.Tweet(post.Text)
-				log.Println(weibo_account.Name, post.Text)
+				log.Println(weibo_account.Name, post.Text, tweet)
 				if err != nil {
 					log.Println("[error]", tweet, err)
 				}
