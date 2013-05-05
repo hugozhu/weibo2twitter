@@ -2,15 +2,11 @@ package main
 
 import (
 	"config"
-	"encoding/json"
 	"fmt"
 	"github.com/bsdf/twitter"
-	"io/ioutil"
+	"github.com/hugozhu/goweibo"
 	"log"
-	"net/http"
 	"os"
-	"strconv"
-	"strings"
 	"unicode/utf8"
 )
 
@@ -44,73 +40,44 @@ type Post struct {
 	Text string
 }
 
-func Timeline(access_token string, screen_name string, since_id int64) []Post {
-	url := "https://api.weibo.com/2/statuses/user_timeline.json?access_token=" + access_token
-	url += fmt.Sprintf("&screen_name=%s&since_id=%d", screen_name, since_id)
-
-	//url = "http://www.baidu.com"
-
-	resp, err := http.Get(url)
-	if err != nil {
-		log.Fatal(url, err)
-	}
-	defer resp.Body.Close()
-	bytes, _ := ioutil.ReadAll(resp.Body)
-
-	log.Println(url)
-
+func Timeline(screen_name string, since_id int64) []Post {
 	var posts = []Post{}
-	if resp.StatusCode == 200 {
-		var data map[string]interface{}
-		json.Unmarshal(bytes, &data)
+	for _, p := range sina.TimeLine(0, screen_name, since_id, 20) {
+		id := p.Id
+		text := p.Text
+		link := ""
+		if p.Original_Pic != "" {
+			link = " ✈ " + p.Original_Pic
+		}
+		if p.Retweeted_Status != nil {
+			if p.Retweeted_Status.User != nil {
+				re_user := p.Retweeted_Status.User
+				text = text + " //RT @" + re_user.Name + ": " + p.Retweeted_Status.Text
+			}
 
-		// log.Println(string(bytes))
-
-		if data["statuses"] != nil {
-			for _, entry := range data["statuses"].([]interface{}) {
-				entry := entry.(map[string]interface{})
-				id, _ := strconv.ParseInt(entry["idstr"].(string), 10, 64)
-				text := entry["text"].(string)
-				link := ""
-				if entry["original_pic"] != nil {
-					link = " ✈ " + entry["original_pic"].(string)
-				}
-
-				if entry["retweeted_status"] != nil {
-					retweeted := entry["retweeted_status"].(map[string]interface{})
-					if retweeted["user"] != nil {
-						re_user := retweeted["user"].(map[string]interface{})
-						text = text + " //RT @" + re_user["name"].(string) + ": " + retweeted["text"].(string)
-					}
-
-					if retweeted["original_pic"] != nil {
-						link = " ✈ " + retweeted["original_pic"].(string)
-					}
-				}
-				len1 := utf8.RuneCount([]byte(text))
-				len2 := utf8.RuneCount([]byte(link))
-				if len1+len2 > 140 {
-					text = SubStringByChar(text, 140-len2) + link
-				} else {
-					text = text + link
-				}
-
-				posts = append(posts, Post{id, text})
+			if p.Retweeted_Status.Original_Pic != "" {
+				link = " ✈ " + p.Retweeted_Status.Original_Pic
 			}
 		}
-	} else {
-		log.Fatal(string(bytes))
+		len1 := utf8.RuneCount([]byte(text))
+		len2 := utf8.RuneCount([]byte(link))
+		if len1+len2 > 140 {
+			link2 := fmt.Sprintf("http://weibo.com/%d/%s", p.User.Id, sina.QueryMid(id, 1))
+			text = SubStringByChar(text, 140-38-len2) + link + " " + link2
+		} else {
+			text = text + link
+		}
+		posts = append(posts, Post{id, text})
 	}
 	return posts
 }
-
-var ACCESS_TOKEN string
 
 func sync(name string, user *config.User) {
 	if user.Enabled {
 		weibo_account := user.GetAccount("tsina")
 		twitter_account := user.GetAccount("twitter")
-		posts := Timeline(ACCESS_TOKEN, weibo_account.Name, user.Last_weibo_id)
+		Timeline(weibo_account.Name, user.Last_weibo_id)
+		posts := Timeline(weibo_account.Name, user.Last_weibo_id)
 		t := twitter.Twitter{
 			ConsumerKey:      config.Twitter_ConsumerKey,
 			ConsumerSecret:   config.Twitter_ConsumerSecret,
@@ -119,6 +86,8 @@ func sync(name string, user *config.User) {
 		}
 		for i := len(posts) - 1; i >= 0; i-- {
 			post := posts[i]
+			log.Println(post)
+			continue
 			if post.Id > user.Last_weibo_id {
 				user.Last_weibo_id = post.Id
 				tweet, err := t.Tweet(post.Text)
@@ -133,12 +102,12 @@ func sync(name string, user *config.User) {
 
 var complete_chan chan string
 
+var sina = &weibo.Sina{
+	AccessToken: weibo.ReadToken("token"),
+}
+
 func init() {
-	data, err := ioutil.ReadFile(os.Getenv("PWD") + "/token")
-	if err != nil {
-		log.Fatal(err)
-	}
-	ACCESS_TOKEN = strings.TrimSpace(string(data))
+
 }
 
 func main() {
