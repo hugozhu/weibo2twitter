@@ -86,8 +86,6 @@ func sync(name string, user *config.User) {
 		}
 		for i := len(posts) - 1; i >= 0; i-- {
 			post := posts[i]
-			log.Println(post)
-			continue
 			if post.Id > user.Last_weibo_id {
 				user.Last_weibo_id = post.Id
 				tweet, err := t.Tweet(post.Text)
