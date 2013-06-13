@@ -3,10 +3,14 @@ package main
 import (
 	"config"
 	"fmt"
-	"github.com/bsdf/twitter"
 	"github.com/hugozhu/goweibo"
+	"github.com/kurrik/oauth1a"
+	"github.com/kurrik/twittergo"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -76,19 +80,15 @@ func sync(name string, user *config.User) {
 	if user.Enabled {
 		weibo_account := user.GetAccount("tsina")
 		twitter_account := user.GetAccount("twitter")
-		Timeline(weibo_account.Name, user.Last_weibo_id)
 		posts := Timeline(weibo_account.Name, user.Last_weibo_id)
-		t := twitter.Twitter{
-			ConsumerKey:      config.Twitter_ConsumerKey,
-			ConsumerSecret:   config.Twitter_ConsumerSecret,
-			OAuthToken:       twitter_account.Oauth_token_key,
-			OAuthTokenSecret: twitter_account.Oauth_token_secret,
-		}
+
+		oauth_user := oauth1a.NewAuthorizedConfig(twitter_account.Oauth_token_key, twitter_account.Oauth_token_secret)
+		client := twittergo.NewClient(twitter_config, oauth_user)
 		for i := len(posts) - 1; i >= 0; i-- {
 			post := posts[i]
 			if post.Id > user.Last_weibo_id {
 				user.Last_weibo_id = post.Id
-				tweet, err := t.Tweet(post.Text)
+				tweet, err := Tweet(client, post.Text)
 				log.Println(weibo_account.Name, post.Text, tweet)
 				if err != nil {
 					log.Println("[error]", tweet, err)
@@ -104,8 +104,35 @@ var sina = &weibo.Sina{
 	AccessToken: weibo.ReadToken("token"),
 }
 
-func init() {
+var twitter_config = &oauth1a.ClientConfig{
+	ConsumerKey:    config.Twitter_ConsumerKey,
+	ConsumerSecret: config.Twitter_ConsumerSecret,
+}
 
+func init() {
+	var debug = false
+	weibo.SetDebugEnabled(&debug)
+}
+
+func Tweet(client *twittergo.Client, post string) (*twittergo.Tweet, error) {
+	data := url.Values{}
+	data.Set("status", post)
+	body := strings.NewReader(data.Encode())
+	req, err := http.NewRequest("POST", "/1.1/statuses/update.json", body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.SendRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	tweet := &twittergo.Tweet{}
+	err = resp.Parse(tweet)
+	if err != nil {
+		return nil, err
+	}
+	return tweet, nil
 }
 
 func main() {
